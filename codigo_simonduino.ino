@@ -2,7 +2,6 @@
 #include <Wire.h>
 //LIBRERIAS PROPIAS I2C PARA EL LCD
 #include <LiquidCrystal_I2C.h>
-
 #include <Chrono.h>
 
 //Declaramos los componentes
@@ -22,8 +21,8 @@ char* opcionesMenu[1];
 int currentOptionMenu;
 
 //VALORES DE EVENTO PARA LOS PULSADORES
-const int PRESSED = 0;
-const int RELEASED = 1;
+const char PRESSED = 0;
+const char RELEASED = 1;
 
 //PULSADORES Y LEDS DE LOS PULSADORES
 //Botón Verde
@@ -59,6 +58,7 @@ Chrono buttonWhiteChrono;
 Chrono buttonTurnOffChrono;
 Chrono buttonTurnOnChrono;
 Chrono stanbyChrono;
+Chrono levelUpChrono;
 
 //BUZZER
 const int BUZZER = 11;
@@ -68,6 +68,8 @@ int* secuence;
 
 //Variable del turno actual
 int maxLevel = 20;
+int minLevel = 1;
+int auxMinLevel;
 int currentLevel;
 int index;
 int currentTimeOn;
@@ -81,12 +83,13 @@ const int OFF = 0;
 
 int whiteLedState = OFF;
 int simonTurnLedState = OFF;
+int helpState = ON;
 
 const char* BLANK_LINE = "                ";
 
 //Variable que indica los ESTADOS
 //Posibles estados de juego
-int currentSimonduinoState, lastSimonduinoState;
+int currentSimonduinoState;
 const int INSIDE_MENU = 0;
 const int ARDUINO_TURN = 1;
 const int PLAYER_TURN = 2;
@@ -190,6 +193,27 @@ void initArduino() {
   LoadMenuOptions();
 }
 
+void changeLCDLevelUpHelp() {
+  if (levelUpChrono.hasPassed(1000)) {
+    lcd.setCursor(0, 1);
+    lcd.print(BLANK_LINE); // @suppress("Ambiguous problem")
+    if (helpState == ON) {
+      helpState = OFF;
+      lcd.setCursor(center("X yellow blue X"), 1);
+      lcd.write(4); // @suppress("Ambiguous problem")
+      lcd.print(" yellow blue "); // @suppress("Ambiguous problem")
+      lcd.write(5); // @suppress("Ambiguous problem")
+    } else {
+      helpState = ON;
+      lcd.setCursor(center("X green red X"), 1);
+      lcd.write(1); // @suppress("Ambiguous problem")
+      lcd.print(" green red "); // @suppress("Ambiguous problem")
+      lcd.write(2); // @suppress("Ambiguous problem")
+    }
+    levelUpChrono.restart();
+  }
+}
+
 /*Método que inicializa el estado STANBY*/
 void initSTANBY() {
   if (stanbyChrono.hasPassed(1000)) {
@@ -250,22 +274,22 @@ void initStandByLCD() {
   lcd.print("Press white button!"); // @suppress("Ambiguous problem")
 }
 
-void initLevelUpLCD(){
-  if(currentLevel<10){
-    lcd.setCursor(center("Start level X"),0);
-  }else{
-    lcd.setCursor(center("Start level XX"),0);
+void initLevelUpLCD() {
+  lcd.clear();
+  if (minLevel < 10) {
+    lcd.setCursor(center("Start level X"), 0);
+  } else {
+    lcd.setCursor(center("Start level XX"), 0);
   }
   lcd.print("Start level ");  // @suppress("Ambiguous problem")
-  lcd.print(currentLevel);  // @suppress("Ambiguous problem")
-  lcd.setCursor(center("X yellow blue X"),1);
-  lcd.write(4); // @suppress("Ambiguous problem")
-  lcd.print(" yellow blue "); // @suppress("Ambiguous problem")
-  lcd.write(5); // @suppress("Ambiguous problem")
+  lcd.print(minLevel);  // @suppress("Ambiguous problem")
 }
 
 void calculateTimes() {
-  if ((currentLevel - 1) % 5 == 0 && currentLevel < 20) {
+  currentTimeOn = MAXTIMEON;
+  currentTimeOff = MAXTIMEOFF;
+  currentTimeSound = MAXTIMEON;
+  for (int i = 0; i < (currentLevel - 1) / 5; i++) {
     currentTimeOn = currentTimeOn / 2;
     currentTimeOff = currentTimeOff / 2;
     currentTimeSound = currentTimeOff;
@@ -280,11 +304,11 @@ void changeState(int previousState, int nextState) {
   }
   if (previousState == STANDBY) {
     if (nextState == ARDUINO_TURN) {
-      currentLevel = 1;
+      Serial.print("minLevel vale:");
+      Serial.println(minLevel);
+      currentLevel = minLevel;
       index = 0;
-      currentTimeOn = MAXTIMEON;
-      currentTimeOff = MAXTIMEOFF;
-      currentTimeSound = MAXTIMEON;
+      calculateTimes();
       ramdomSecuenceGenerator();
       initArduinoTurnLCD();
       currentSimonduinoState = ARDUINO_TURN;
@@ -349,8 +373,22 @@ void changeState(int previousState, int nextState) {
       return;
     }
     if (nextState == LEVELUP_OPTION) {
+      Serial.println(
+          "Estoy en changeState cambiando de INSIDE_MENU a LEVELUP_OPTION");
       lcd.clear();
       initLevelUpLCD();
+      helpState = ON;
+      auxMinLevel = minLevel;
+      currentSimonduinoState = LEVELUP_OPTION;
+      return;
+    }
+  }
+
+  if (previousState == LEVELUP_OPTION) {
+    if (nextState == STANDBY) {
+      lcd.clear();
+      initStandByLCD();
+      currentSimonduinoState = STANDBY;
     }
   }
 
@@ -557,6 +595,9 @@ void loop() {
   if (currentSimonduinoState == STANDBY) {
     initSTANBY();
   }
+  if (currentSimonduinoState == LEVELUP_OPTION) {
+    changeLCDLevelUpHelp();
+  }
 
   if (digitalRead(BUTTON_WHITE) == PRESSED) { // BLANCO
     if (buttonWhiteLastState == RELEASED) {
@@ -587,8 +628,8 @@ void loop() {
         digitalWrite(LED_BLUE, LOW);
         digitalWrite(LED_YELLOW, LOW);
         lcd.clear();
-        lcd.setCursor(center("Restart game?"), 0);
-        lcd.print("Restart game?"); // @suppress("Ambiguous problem")
+        lcd.setCursor(center("Exit game?"), 0);
+        lcd.print("Exit game?"); // @suppress("Ambiguous problem")
         currentSimonduinoState = WAITING_ACTION;
       }
     }
@@ -599,11 +640,14 @@ void loop() {
     //Serial.println("ARDUINO_TURN");
   } else if (currentSimonduinoState == INSIDE_MENU
       || (currentSimonduinoState == PLAYER_TURN && index < currentLevel)
-      || currentSimonduinoState == WAITING_ACTION) {
+      || currentSimonduinoState == WAITING_ACTION
+      || currentSimonduinoState == LEVELUP_OPTION) {
 
     if (digitalRead(BUTTON_RED) == PRESSED) { //ROJO
       if (buttonRedLastState == RELEASED) {
-        tone(BUZZER, 349, 250);
+        if (currentSimonduinoState == PLAYER_TURN) {
+          tone(BUZZER, 349, 250);
+        }
         digitalWrite(LED_RED, HIGH);
         buttonRedLastState = PRESSED;
         delay(1);
@@ -612,6 +656,8 @@ void loop() {
       digitalWrite(LED_RED, LOW);
       buttonRedLastState = RELEASED;
       Serial.println("ROJO");
+      Serial.print("Estoy en rojo y currentSimonduinoState vale:");
+      Serial.println(currentSimonduinoState);
       switch (currentSimonduinoState) {
       case INSIDE_MENU:
         changeState(INSIDE_MENU, STANDBY);
@@ -627,12 +673,18 @@ void loop() {
       case WAITING_ACTION:
         changeState(WAITING_ACTION, ARDUINO_TURN);
         break;
+      case LEVELUP_OPTION:
+        minLevel = auxMinLevel;
+        changeState(LEVELUP_OPTION, STANDBY);
+        break;
       }
     }
 
     if (digitalRead(BUTTON_GREEN) == PRESSED) { //VERDE
       if (buttonGreenLastState == RELEASED) {
-        tone(BUZZER, 466, 250);
+        if (currentSimonduinoState == PLAYER_TURN) {
+          tone(BUZZER, 466, 250);
+        }
         digitalWrite(LED_GREEN, HIGH);
         buttonGreenLastState = PRESSED;
         delay(1);
@@ -641,8 +693,11 @@ void loop() {
       digitalWrite(LED_GREEN, LOW);
       buttonGreenLastState = RELEASED;
       Serial.println("VERDE");
+      Serial.print("Estoy en verde y currentSimonduinoState vale:");
+      Serial.println(currentSimonduinoState);
       switch (currentSimonduinoState) {
       case INSIDE_MENU:
+        Serial.println("Estoy en inside_menu y he pulsado verde");
         changeState(INSIDE_MENU, LEVELUP_OPTION);
         break;
       case PLAYER_TURN:
@@ -656,12 +711,17 @@ void loop() {
       case WAITING_ACTION:
         changeState(WAITING_ACTION, STANDBY);
         break;
+      case LEVELUP_OPTION:
+        changeState(LEVELUP_OPTION, STANDBY);
+        break;
       }
     }
 
     if (digitalRead(BUTTON_BLUE) == PRESSED) { //AZUL
       if (buttonBlueLastState == RELEASED) {
-        tone(BUZZER, 233, 250);
+        if (currentSimonduinoState == PLAYER_TURN) {
+          tone(BUZZER, 233, 250);
+        }
         digitalWrite(LED_BLUE, HIGH);
         buttonBlueLastState = PRESSED;
         delay(1);
@@ -670,6 +730,8 @@ void loop() {
       digitalWrite(LED_BLUE, LOW);
       buttonBlueLastState = RELEASED;
       Serial.println("AZUL");
+      Serial.print("Estoy en azul y currentSimonduinoState vale:");
+      Serial.println(currentSimonduinoState);
       switch (currentSimonduinoState) {
       case INSIDE_MENU:
         break;
@@ -681,12 +743,25 @@ void loop() {
           buttonTurnOnChrono.restart();
         }
         break;
+      case LEVELUP_OPTION:
+        if (minLevel > 0) {
+          Serial.print("Antes de accion azul minLevel vale: ");
+          Serial.println(minLevel);
+          minLevel--;
+          Serial.print("Después de accion azul minLevel vale: ");
+          Serial.println(minLevel);
+
+          initLevelUpLCD();
+        }
+        break;
       }
     }
 
     if (digitalRead(BUTTON_YELLOW) == PRESSED) { //AMARILLO
       if (buttonYellowLastState == RELEASED) {
-        tone(BUZZER, 277, 250);
+        if (currentSimonduinoState == PLAYER_TURN) {
+          tone(BUZZER, 277, 250);
+        }
         digitalWrite(LED_YELLOW, HIGH);
         buttonYellowLastState = PRESSED;
         delay(1);
@@ -695,6 +770,8 @@ void loop() {
       digitalWrite(LED_YELLOW, LOW);
       buttonYellowLastState = RELEASED;
       Serial.println("AMARILLO");
+      Serial.print("Estoy en amarillo y currentSimonduinoState vale:");
+      Serial.println(currentSimonduinoState);
       switch (currentSimonduinoState) {
       case INSIDE_MENU:
         break;
@@ -704,6 +781,17 @@ void loop() {
         } else {
           index++;
           buttonTurnOnChrono.restart();
+        }
+        break;
+      case LEVELUP_OPTION:
+        if (minLevel < maxLevel) {
+          Serial.print("Antes de accion amarillo minLevel vale: ");
+          Serial.println(minLevel);
+          minLevel++;
+          Serial.print("Después de accion amarillo minLevel vale: ");
+          Serial.println(minLevel);
+
+          initLevelUpLCD();
         }
         break;
       }
